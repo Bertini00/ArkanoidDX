@@ -5,7 +5,7 @@ class RectArk
 {
 public:
 	RectArk(float x, float y, float width, float height, D3DXCOLOR color);
-	~RectArk();
+	virtual ~RectArk();
 
 	float magnitudeDiagonal();
 
@@ -13,6 +13,8 @@ public:
 	float getY();
 	float getWidth();
 	float getHeight();
+
+	D3DXCOLOR getColor();
 
 protected:
 	float x, y, width, height;

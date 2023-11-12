@@ -1,4 +1,4 @@
-#include "Rectangle.h"
+#include "RectArk.h"
 #include <cmath>
 
 RectArk::RectArk(float x, float y, float width, float height, D3DXCOLOR color) {
@@ -7,6 +7,10 @@ RectArk::RectArk(float x, float y, float width, float height, D3DXCOLOR color) {
 	RectArk::width = width;
 	RectArk::height = height;
 	RectArk::color = color;
+}
+
+RectArk::~RectArk() {
+
 }
 
 float RectArk::magnitudeDiagonal()
@@ -25,5 +29,9 @@ float RectArk::getX() {
 }
 float RectArk::getY() {
 	return y;
+}
+
+D3DXCOLOR RectArk::getColor() {
+	return color;
 }
 

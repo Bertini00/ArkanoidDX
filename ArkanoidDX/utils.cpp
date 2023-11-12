@@ -1,5 +1,9 @@
 #include "utils.h"
 
+/*
+* The top left corner has coordinate {0, 0}
+* The bottom right corner has coordinate {screenWidth, screenHeight}
+*/
 std::pair<float, float> getCoordinateRelative(float x, float y, float screenWidth, float screenHeight) {
 	float xTmp = x * 2 / screenWidth;
 	xTmp -= 1;

@@ -9,15 +9,42 @@
 #include "gameOptions.h"
 #include <vector>
 #include "Components.h"
+#include <stdlib.h>
+#include <chrono>
+#include <algorithm>
 
 // include the Direct3D Library file
 #pragma comment (lib, "d3d11.lib")
 #pragma comment (lib, "d3dx11.lib")
 #pragma comment (lib, "d3dx10.lib")
 
+
 // define the screen resolution
 #define SCREEN_WIDTH  800
 #define SCREEN_HEIGHT 600
+#define SCREEN_SAFE_TIME 0.3f
+
+
+#define STARTING_BALL_X SCREEN_WIDTH / 2 - 20
+#define STARTING_BALL_Y SCREEN_HEIGHT - 20 - PLATFORM_HEIGHT
+#define STARTING_BALL_VELOCITY_X 150
+#define STARTING_BALL_VELOCITY_Y -150
+
+#define STARTING_PLATFORM_X (SCREEN_WIDTH - PLATFORM_WIDTH) / 2
+#define STARTING_PLATFORM_Y SCREEN_HEIGHT - PLATFORM_HEIGHT
+#define PLATFORM_HEIGHT 30
+#define PLATFORM_WIDTH 200
+#define PLATFORM_SPEED 400
+#define PLATFORM_SAFE_TIME 0.5f
+
+#define BLOCK_NUMBER 8
+#define BLOCK_PADDING 2
+#define BLOCK_WIDTH_NO_PADDING 100
+#define BLOCK_HEIGHT_NO_PADDING 40
+#define BLOCK_WIDTH BLOCK_WIDTH_NO_PADDING - 2*BLOCK_PADDING 
+#define BLOCK_HEIGHT BLOCK_HEIGHT_NO_PADDING - 2*BLOCK_PADDING
+
+#define FINAL_VERTEX_SIZE 6 * (2 + BLOCK_NUMBER)
 
 // global declarations
 IDXGISwapChain* swapchain;             // the pointer to the swap chain interface
@@ -29,11 +56,19 @@ ID3D11VertexShader* pVS;               // the pointer to the vertex shader
 ID3D11PixelShader* pPS;                // the pointer to the pixel shader
 ID3D11Buffer* pVBuffer;                // the pointer to the vertex buffer
 
+
 Ball* ball;
-std::vector<RectArk*> blockVector;
-VERTEX OurVertices[6];
+Platform* platform;
 
+std::vector<RectArk*> blockVector(BLOCK_NUMBER);
+std::vector<bool> hitVector(BLOCK_NUMBER);
+VERTEX OurVertices[FINAL_VERTEX_SIZE];
 
+float platformSafeTime = 0;
+float screenSafeTime = 0;
+
+int hitBlocks = 0;
+bool gameOver = false;
 
 
 // function prototypes
@@ -48,9 +83,16 @@ void InsertBall(VERTEX *&Vertices);
 void InsertPlatform(VERTEX *&Vertices);
 void InsertBlocks(VERTEX *&Vertices);
 void UpdateBallPosition(VERTEX* Vertices);
+void UpdatePlatformPosition(VERTEX* Vertices);
+void CheckCollisions(VERTEX* Vertices, HWND hWnd);
+void CheckScreenCollision(HWND hWnd);
+void CheckBlocksCollision(VERTEX* Vertices);
+void CheckPlatformCollision();
+void ResetLevel(VERTEX* Vertices);
 
 // the WindowProc function prototype
 LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
+
 
 
 // the entry point for any Windows program
@@ -99,7 +141,7 @@ int WINAPI WinMain(HINSTANCE hInstance,
     MSG msg;
 
     Timer* t = new Timer();
-
+    
     while (TRUE)
     {
         t->tick();
@@ -111,11 +153,40 @@ int WINAPI WinMain(HINSTANCE hInstance,
             if (msg.message == WM_QUIT)
                 break;
         }
-        ball->integrate(t->getDeltaTime());
-        UpdateBallPosition(OurVertices);
+        if (GetKeyState('A') & 0x8000 && platform->getX() > 0)
+        {
+            platform->changeDirection(-1);
+        }
+        if (GetKeyState('D') & 0x8000 && platform->getX() + platform->getWidth() < SCREEN_WIDTH)
+        {
+            platform->changeDirection(1);
+        }
+        if (GetKeyState('P') & 0x8000)
+        {
+            break;
+        }
+        /*
+        */
+        CheckCollisions(OurVertices, hWnd);
 
+        ball->integrate(t->getDeltaTime());
+        platform->integrate(t->getDeltaTime());
+        UpdateBallPosition(OurVertices);
+        UpdatePlatformPosition(OurVertices);
+        platformSafeTime += t->getDeltaTime();
+        screenSafeTime += t->getDeltaTime();
+
+
+        if (hitBlocks == BLOCK_NUMBER)
+        {
+            ResetLevel(OurVertices);
+            //break;
+        }
+            
         RenderFrame();
+
     }
+        
 
     // clean up DirectX and COM
     CleanD3D();
@@ -213,7 +284,7 @@ void RenderFrame(void)
     ZeroMemory(&bd, sizeof(bd));
 
     bd.Usage = D3D11_USAGE_DYNAMIC;                // write access access by CPU and GPU
-    bd.ByteWidth = sizeof(VERTEX) * 6;             // size is the VERTEX struct * 3
+    bd.ByteWidth = sizeof(VERTEX) * FINAL_VERTEX_SIZE;             // size is the VERTEX struct * 3
     bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;       // use as a vertex buffer
     bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;    // allow CPU to write in buffer
 
@@ -238,7 +309,7 @@ void RenderFrame(void)
     devcon->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
     // draw the vertex buffer to the back buffer
-    devcon->Draw(6, 0);
+    devcon->Draw(FINAL_VERTEX_SIZE, 0);
 
     // switch the back buffer and the front buffer
     swapchain->Present(0, 0);
@@ -259,6 +330,18 @@ void CleanD3D(void)
     backbuffer->Release();
     dev->Release();
     devcon->Release();
+    
+    delete ball;
+    delete platform;
+    
+    for (int i = 0; i < blockVector.size(); i++)
+    {
+        delete blockVector[i];
+    }
+
+    blockVector.clear();
+    hitVector.clear();
+    
 }
 
 
@@ -289,7 +372,7 @@ void InitGraphics()
     ZeroMemory(&bd, sizeof(bd));
 
     bd.Usage = D3D11_USAGE_DYNAMIC;                // write access access by CPU and GPU
-    bd.ByteWidth = sizeof(VERTEX) * 6;             // size is the VERTEX struct * 3
+    bd.ByteWidth = sizeof(VERTEX) * FINAL_VERTEX_SIZE;             // size is the VERTEX struct * 3
     bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;       // use as a vertex buffer
     bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;    // allow CPU to write in buffer
 
@@ -340,21 +423,20 @@ void InitComponents(VERTEX Vertices[]) {
 }
 
 void InsertBall(VERTEX *&Vertices) {
-    
-    ball = new Ball(SCREEN_WIDTH / 2 - 20, SCREEN_HEIGHT - 20, 20, 20, {0.0f, 1.0f, 0.0f, 1.0f}, 100, -100);
+    ball = new Ball(STARTING_BALL_X, STARTING_BALL_Y, 20, 20, {0.0f, 1.0f, 0.0f, 1.0f}, STARTING_BALL_VELOCITY_X, STARTING_BALL_VELOCITY_Y);
     std::pair<float, float> tmpS = getCoordinateRelative(ball->getX(), ball->getY(), SCREEN_WIDTH, SCREEN_HEIGHT);
     std::pair<float, float> tmpWH = getCoordinateRelative(ball->getX() + ball->getWidth(), ball->getY() + ball->getHeight(), SCREEN_WIDTH, SCREEN_HEIGHT);
-    *Vertices = { tmpS.first, tmpS.second, 0.0f, D3DXCOLOR(1.0f, 0.0f, 0.0f, 1.0f) };
+    *Vertices = { tmpS.first, tmpS.second, 0.0f, ball->getColor()};
     Vertices++;
-    *Vertices = { tmpWH.first, tmpS.second, 0.0f, D3DXCOLOR(1.0f, 0.0f, 0.0f, 1.0f) };
+    *Vertices = { tmpWH.first, tmpS.second, 0.0f, ball->getColor() };
     Vertices++;
-    *Vertices = { tmpS.first, tmpWH.second, 0.0f, D3DXCOLOR(1.0f, 0.0f, 0.0f, 1.0f) };
+    *Vertices = { tmpS.first, tmpWH.second, 0.0f, ball->getColor() };
     Vertices++;
-    *Vertices = { tmpS.first, tmpWH.second, 0.0f, D3DXCOLOR(1.0f, 0.0f, 0.0f, 1.0f) };
+    *Vertices = { tmpS.first, tmpWH.second, 0.0f, ball->getColor() };
     Vertices++;
-    *Vertices = { tmpWH.first, tmpS.second, 0.0f, D3DXCOLOR(1.0f, 0.0f, 0.0f, 1.0f) };
+    *Vertices = { tmpWH.first, tmpS.second, 0.0f, ball->getColor() };
     Vertices++;
-    *Vertices = { tmpWH.first, tmpWH.second, 0.0f, D3DXCOLOR(1.0f, 0.0f, 0.0f, 1.0f) };
+    *Vertices = { tmpWH.first, tmpWH.second, 0.0f, ball->getColor() };
     Vertices++;
     
     
@@ -362,24 +444,270 @@ void InsertBall(VERTEX *&Vertices) {
 void UpdateBallPosition(VERTEX* Vertices) {
     std::pair<float, float> tmpS = getCoordinateRelative(ball->getX(), ball->getY(), SCREEN_WIDTH, SCREEN_HEIGHT);
     std::pair<float, float> tmpWH = getCoordinateRelative(ball->getX() + ball->getWidth(), ball->getY() + ball->getHeight(), SCREEN_WIDTH, SCREEN_HEIGHT);
-    *Vertices = { tmpS.first, tmpS.second, 0.0f, D3DXCOLOR(1.0f, 0.0f, 0.0f, 1.0f) };
+    *Vertices = { tmpS.first, tmpS.second, 0.0f, ball->getColor() };
     Vertices++;
-    *Vertices = { tmpWH.first, tmpS.second, 0.0f, D3DXCOLOR(1.0f, 0.0f, 0.0f, 1.0f) };
+    *Vertices = { tmpWH.first, tmpS.second, 0.0f, ball->getColor() };
     Vertices++;
-    *Vertices = { tmpS.first, tmpWH.second, 0.0f, D3DXCOLOR(1.0f, 0.0f, 0.0f, 1.0f) };
+    *Vertices = { tmpS.first, tmpWH.second, 0.0f, ball->getColor() };
     Vertices++;
-    *Vertices = { tmpS.first, tmpWH.second, 0.0f, D3DXCOLOR(1.0f, 0.0f, 0.0f, 1.0f) };
+    *Vertices = { tmpS.first, tmpWH.second, 0.0f, ball->getColor() };
     Vertices++;
-    *Vertices = { tmpWH.first, tmpS.second, 0.0f, D3DXCOLOR(1.0f, 0.0f, 0.0f, 1.0f) };
+    *Vertices = { tmpWH.first, tmpS.second, 0.0f, ball->getColor() };
     Vertices++;
-    *Vertices = { tmpWH.first, tmpWH.second, 0.0f, D3DXCOLOR(1.0f, 0.0f, 0.0f, 1.0f) };
+    *Vertices = { tmpWH.first, tmpWH.second, 0.0f, ball->getColor() };
     Vertices++;
 }
 
 void InsertPlatform(VERTEX *&Vertices) {
+    platform = new Platform(STARTING_PLATFORM_X , STARTING_PLATFORM_Y, 200, PLATFORM_HEIGHT, { 1.0f, 0.0f, 0.0f, 1.0f }, PLATFORM_SPEED);
+    std::pair<float, float> tmpS = getCoordinateRelative(platform->getX(), platform->getY(), SCREEN_WIDTH, SCREEN_HEIGHT);
+    std::pair<float, float> tmpWH = getCoordinateRelative(platform->getX() + platform->getWidth(), platform->getY() + platform->getHeight(), SCREEN_WIDTH, SCREEN_HEIGHT);
+    *Vertices = { tmpS.first, tmpS.second, 0.0f, platform->getColor()};
+    Vertices++;
+    *Vertices = { tmpWH.first, tmpS.second, 0.0f, platform->getColor() };
+    Vertices++;
+    *Vertices = { tmpS.first, tmpWH.second, 0.0f, platform->getColor() };
+    Vertices++;
+    *Vertices = { tmpS.first, tmpWH.second, 0.0f, platform->getColor() };
+    Vertices++;
+    *Vertices = { tmpWH.first, tmpS.second, 0.0f, platform->getColor() };
+    Vertices++;
+    *Vertices = { tmpWH.first, tmpWH.second, 0.0f, platform->getColor() };
+    Vertices++;
+}
 
+void UpdatePlatformPosition(VERTEX* Vertices) {
+    // Platform being always the second object, advance the pointer by 6
+    Vertices += 6;
+    //TMPS = TempStart -> The top left point of the Rectangle
+    //TMPWH = TempWidthHeight -> The bottom right point of the Rectangle
+
+    std::pair<float, float> tmpS = getCoordinateRelative(platform->getX(), platform->getY(), SCREEN_WIDTH, SCREEN_HEIGHT);
+    std::pair<float, float> tmpWH = getCoordinateRelative(platform->getX() + platform->getWidth(), platform->getY() + platform->getHeight(), SCREEN_WIDTH, SCREEN_HEIGHT);
+    *Vertices = { tmpS.first, tmpS.second, 0.0f, platform->getColor() };
+    Vertices++;
+    *Vertices = { tmpWH.first, tmpS.second, 0.0f, platform->getColor() };
+    Vertices++;
+    *Vertices = { tmpS.first, tmpWH.second, 0.0f, platform->getColor() };
+    Vertices++;
+    *Vertices = { tmpS.first, tmpWH.second, 0.0f, platform->getColor() };
+    Vertices++;
+    *Vertices = { tmpWH.first, tmpS.second, 0.0f, platform->getColor() };
+    Vertices++;
+    *Vertices = { tmpWH.first, tmpWH.second, 0.0f, platform->getColor() };
+    Vertices++;
 }
 
 void InsertBlocks(VERTEX *&Vertices) {
+    RectArk* block;
+    float currentX = 0;
+    float currentY = 0;
+    //D3DXCOLOR color = { 0.8f, 0.4f, 1.0f, 1.0f };
+    std::pair<float, float> tmpS;
+    std::pair<float, float> tmpWH;
+    D3DXCOLOR color;
+    srand(std::chrono::system_clock::now().time_since_epoch().count());
+    blockVector.clear();
+    for (int i = 0; i < BLOCK_NUMBER; i++)
+    {
+        color = { static_cast <float> (rand()) / static_cast <float> (RAND_MAX), static_cast <float> (rand()) / static_cast <float> (RAND_MAX), static_cast <float> (rand()) / static_cast <float> (RAND_MAX), 1.0f};
+        block = new RectArk(currentX + BLOCK_PADDING, currentY + BLOCK_PADDING, BLOCK_WIDTH, BLOCK_HEIGHT, color);
+        blockVector.push_back(block);
+        hitVector.push_back(false);
 
+        tmpS = getCoordinateRelative(block->getX(), block->getY(), SCREEN_WIDTH, SCREEN_HEIGHT);
+        tmpWH = getCoordinateRelative(block->getX() + block->getWidth(), block->getY() + block->getHeight(), SCREEN_WIDTH, SCREEN_HEIGHT);
+
+        // Creating visual rectangle
+        *Vertices = { tmpS.first, tmpS.second, 0.0f, block->getColor() };
+        Vertices++;
+        *Vertices = { tmpWH.first, tmpS.second, 0.0f, block->getColor() };
+        Vertices++;
+        *Vertices = { tmpS.first, tmpWH.second, 0.0f, block->getColor() };
+        Vertices++;
+        *Vertices = { tmpS.first, tmpWH.second, 0.0f, block->getColor() };
+        Vertices++;
+        *Vertices = { tmpWH.first, tmpS.second, 0.0f, block->getColor() };
+        Vertices++;
+        *Vertices = { tmpWH.first, tmpWH.second, 0.0f, block->getColor() };
+        Vertices++;
+
+        currentX += BLOCK_WIDTH_NO_PADDING;
+        if (currentX > SCREEN_WIDTH - BLOCK_WIDTH_NO_PADDING)
+        {
+            currentX = 0;
+            currentY += BLOCK_HEIGHT_NO_PADDING;
+        }
+
+    }
+}
+
+void CheckCollisions(VERTEX* Vertices, HWND hWnd) {
+    CheckScreenCollision(hWnd);
+    CheckBlocksCollision(Vertices);
+    CheckPlatformCollision();
+}
+
+void CheckScreenCollision(HWND hWnd) {
+    if ((ball->getX() < 0 || ball->getX() > (SCREEN_WIDTH - ball->getWidth())) && screenSafeTime > SCREEN_SAFE_TIME)
+    {
+        ball->horizontalCollision();
+        screenSafeTime = 0;
+    }
+    else if (ball->getY() < 0 && screenSafeTime > SCREEN_SAFE_TIME)
+    {
+        ball->verticalCollision();
+        screenSafeTime = 0;
+    }
+    if (ball->getY() > (SCREEN_HEIGHT - ball->getHeight())) {
+        gameOver = true;
+        PostMessage(hWnd, WM_QUIT, 0, 0);
+    }
+}
+
+void CheckBlocksCollision(VERTEX* Vertices) {
+    Vertices += 2 * 6;
+    for (int i = 0; i < blockVector.size(); i++)
+    {
+        RectArk* currentBlock = blockVector[i];
+        if (!hitVector[i])
+        {
+            if (ball->getX() > currentBlock->getX() - ball->getWidth() &&
+                ball->getX() < currentBlock->getX() + currentBlock->getWidth() &&
+                ball->getY() > currentBlock->getY() - ball->getHeight() &&
+                ball->getY() < currentBlock->getY() + currentBlock->getHeight())
+            {
+                *Vertices = { 0.0f, 0.0f, 0.0f, currentBlock->getColor() };
+                Vertices++;
+                *Vertices = { 0.0f, 0.0f, 0.0f, currentBlock->getColor() };
+                Vertices++;
+                *Vertices = { 0.0f, 0.0f, 0.0f, currentBlock->getColor() };
+                Vertices++;
+                *Vertices = { 0.0f, 0.0f, 0.0f, currentBlock->getColor() };
+                Vertices++;
+                *Vertices = { 0.0f, 0.0f, 0.0f, currentBlock->getColor() };
+                Vertices++;
+                *Vertices = { 0.0f, 0.0f, 0.0f, currentBlock->getColor() };
+                Vertices++;
+                hitVector[i] = true;
+
+                hitBlocks++;
+                
+
+                if (min(ball->getX() - (currentBlock->getX() - ball->getWidth()), ball->getX() - (currentBlock->getX() + currentBlock->getWidth())) <
+                    min(ball->getY() - (currentBlock->getY() - ball->getHeight()), ball->getY() - (currentBlock->getY() + currentBlock->getHeight()))
+                    )
+                {
+                    ball->verticalCollision();
+                }
+                else
+                    ball->horizontalCollision();
+
+                
+            }
+            else
+                Vertices += 6;
+        }
+        else
+            Vertices += 6;
+
+    }
+}
+
+void CheckPlatformCollision() {
+    if (ball->getY() + ball->getHeight() > platform->getY() && 
+        ball->getX() > platform->getX() - ball->getWidth() && 
+        ball->getX() < platform->getX() + platform->getWidth() && 
+        platformSafeTime > PLATFORM_SAFE_TIME)
+    {
+        int totalVelocity = abs(STARTING_BALL_VELOCITY_X) + abs(STARTING_BALL_VELOCITY_Y);
+
+        float newXVelocity = 1;
+        float newYVelocity = 1;
+
+        if ((ball->getX() + ball->getWidth()/2) - (platform->getX() + platform->getWidth()/2) > 0 )
+        {
+            // On the right of the platform
+            float p = 0;
+
+            float relativeX = (ball->getX() + ball->getWidth() / 2) - (platform->getX() + platform->getWidth());
+            p = abs(relativeX / (PLATFORM_WIDTH / 2));
+            p = std::clamp(p, 0.0f, 0.75f);
+            newXVelocity *= p * totalVelocity;
+            newYVelocity *= (1 - p) * totalVelocity;
+        }
+        else {
+            // On the left of the platform
+            float p = 0;
+
+            float relativeX = (ball->getX() + ball->getWidth() / 2) - (platform->getX() + platform->getWidth() / 2);
+            p = abs(relativeX / (PLATFORM_WIDTH / 2));
+            p = std::clamp(p, 0.0f, 0.75f);
+            newXVelocity *= p * totalVelocity;
+            newYVelocity *= (1 - p) * totalVelocity;
+            newXVelocity *= -1;
+        }
+
+        ball->setVelocityX(newXVelocity);
+        ball->setVelocityY(newYVelocity);
+
+        platformSafeTime = 0;
+        ball->verticalCollision();
+    }
+}
+
+void ResetLevel(VERTEX* Vertices) {
+    for (int i = 0; i < hitVector.size(); i++)
+    {
+        hitVector[i] = false;
+    }
+    hitBlocks = 0;
+
+    
+    ball->setX(STARTING_BALL_X);
+    ball->setY(STARTING_BALL_Y);
+    ball->setVelocityX(STARTING_BALL_VELOCITY_X);
+    ball->setVelocityY(STARTING_BALL_VELOCITY_Y);
+    
+
+    Vertices += 2 * 6;
+    RectArk* block;
+    float currentX = 0;
+    float currentY = 0;
+    //D3DXCOLOR color = { 0.8f, 0.4f, 1.0f, 1.0f };
+    std::pair<float, float> tmpS;
+    std::pair<float, float> tmpWH;
+    D3DXCOLOR color;
+    
+    for (int i = 0; i < BLOCK_NUMBER; i++)
+    {
+        color = { static_cast <float> (rand()) / static_cast <float> (RAND_MAX), static_cast <float> (rand()) / static_cast <float> (RAND_MAX), static_cast <float> (rand()) / static_cast <float> (RAND_MAX), 1.0f };
+        block = blockVector[i];
+
+        tmpS = getCoordinateRelative(block->getX(), block->getY(), SCREEN_WIDTH, SCREEN_HEIGHT);
+        tmpWH = getCoordinateRelative(block->getX() + block->getWidth(), block->getY() + block->getHeight(), SCREEN_WIDTH, SCREEN_HEIGHT);
+
+        // Creating visual rectangle
+        *Vertices = { tmpS.first, tmpS.second, 0.0f, color};
+        Vertices++;
+        *Vertices = { tmpWH.first, tmpS.second, 0.0f, color };
+        Vertices++;
+        *Vertices = { tmpS.first, tmpWH.second, 0.0f, color };
+        Vertices++;
+        *Vertices = { tmpS.first, tmpWH.second, 0.0f, color };
+        Vertices++;
+        *Vertices = { tmpWH.first, tmpS.second, 0.0f, color };
+        Vertices++;
+        *Vertices = { tmpWH.first, tmpWH.second, 0.0f, color };
+        Vertices++;
+
+        currentX += BLOCK_WIDTH_NO_PADDING;
+        if (currentX > SCREEN_WIDTH - BLOCK_WIDTH_NO_PADDING)
+        {
+            currentX = 0;
+            currentY += BLOCK_HEIGHT_NO_PADDING;
+        }
+
+    }
+    
 }
