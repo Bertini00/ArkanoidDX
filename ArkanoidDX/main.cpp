@@ -93,15 +93,25 @@ int WINAPI WinMain(HINSTANCE hInstance,
         }
         if (GetKeyState('A') & 0x8000 && platform->getX() > 0)
         {
+            // Press A to go left
             platform->changeDirection(-1);
         }
         if (GetKeyState('D') & 0x8000 && platform->getX() + platform->getWidth() < SCREEN_WIDTH)
         {
+            // Press D to go right
             platform->changeDirection(1);
         }
         if (GetKeyState('P') & 0x8000)
         {
+            // Quit game prematurely
             break;
+        }
+        if (GetKeyState('R') & 0x8000)
+        {
+            //ResetLevel
+            ResetLevel(OurVertices);
+            
+            //break;
         }
         /*
         */
@@ -226,14 +236,12 @@ void RenderFrame(void)
     bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;       // use as a vertex buffer
     bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;    // allow CPU to write in buffer
 
-    dev->CreateBuffer(&bd, NULL, &pVBuffer);       // create the buffer
-
-
     // copy the vertices into the buffer
     D3D11_MAPPED_SUBRESOURCE ms;
     devcon->Map(pVBuffer, NULL, D3D11_MAP_WRITE_DISCARD, NULL, &ms);    // map the buffer
     memcpy(ms.pData, OurVertices, sizeof(OurVertices));                 // copy the data
     devcon->Unmap(pVBuffer, NULL);
+    
 
     // clear the back buffer to a deep blue
     devcon->ClearRenderTargetView(backbuffer, D3DXCOLOR(0.0f, 0.2f, 0.4f, 1.0f));
@@ -279,7 +287,7 @@ void CleanD3D(void)
 
     blockVector.clear();
     hitVector.clear();
-    
+
 }
 
 
