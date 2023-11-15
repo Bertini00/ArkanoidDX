@@ -91,12 +91,12 @@ int WINAPI WinMain(HINSTANCE hInstance,
             if (msg.message == WM_QUIT)
                 break;
         }
-        if (GetKeyState('A') & 0x8000 && platform->getX() > 0)
+        if ((GetKeyState('A') & 0x8000 || (GetKeyState(VK_LEFT) & 0x8000)) && platform->getX() > 0)
         {
             // Press A to go left
             platform->changeDirection(-1);
         }
-        if (GetKeyState('D') & 0x8000 && platform->getX() + platform->getWidth() < SCREEN_WIDTH)
+        if ((GetKeyState('D') & 0x8000 || (GetKeyState(VK_RIGHT) & 0x8000)) && platform->getX() + platform->getWidth() < SCREEN_WIDTH)
         {
             // Press D to go right
             platform->changeDirection(1);
