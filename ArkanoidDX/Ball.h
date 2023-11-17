@@ -18,9 +18,12 @@ public:
 
 	void setX(float x);
 	void setY(float y);
-	
+
 	void setVelocityX(float velocityX);
 	void setVelocityY(float velocityY);
+
+	float getVelocityX();
+	float getVelocityY();
 
 private:
 	float velocityX, velocityY;

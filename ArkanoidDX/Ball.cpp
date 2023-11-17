@@ -38,3 +38,10 @@ void Ball::setVelocityX(float velocityX) {
 void Ball::setVelocityY(float velocityY) {
 	Ball::velocityY = velocityY;
 }
+
+float Ball::getVelocityX() {
+	return velocityX;
+}
+float Ball::getVelocityY() {
+	return velocityY;
+}
